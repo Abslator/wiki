@@ -1,99 +1,142 @@
-from django.shortcuts import render
 import markdown
-from . import util
 import random
+from django import forms
+from django.http import HttpResponseRedirect
+from django.shortcuts import render
+from django.urls import reverse
+from django.core.files.storage import default_storage
+from . import util
+
+
+class SearchForm(forms.Form):
+    query = forms.CharField(label="",
+        widget=forms.TextInput(attrs={'placeholder': 'Search Wiki', 
+            'style': 'width:100%'}))
+
+
+class NewPageForm(forms.Form):
+    title = forms.CharField(label="", widget=forms.TextInput(attrs={
+            'placeholder': 'Enter title', 'id': 'new-entry-title'}))
+    data = forms.CharField(label="", widget=forms.Textarea(attrs={
+        'id': 'new-entry'}))
+
+
+class EditPageForm(forms.Form):
+    title = forms.CharField(label="", widget=forms.TextInput(attrs={
+        'id': 'edit-entry-title'}))
+    data = forms.CharField(label="", widget=forms.Textarea(attrs={
+        'id': 'edit-entry'}))
+
 
 def index(request):
     return render(request, "encyclopedia/index.html", {
-        "entries": util.list_entries()
+        "entries": util.list_entries(),
+        "form": SearchForm()
     })
 
-def convert_to_HTML(entry_name):
-    md = markdown.Markdown()
-    entry = util.get_entry(entry_name)
-    html = md.convert(entry) if entry else None
-    return html
-
-def entry(request, entry_name):
-    html = convert_to_HTML(entry_name)
-    if html is None:
-        return render(request, "encyclopedia/wrong_entry.html",{
-            "entryTitle": entry_name
+def entry(request, title):
+    entry = util.get_entry(title)
+    if entry is None:
+        return render(request, "encyclopedia/error.html", {
+            "title": title,
+            "form": SearchForm()
         })
     else:
         return render(request, "encyclopedia/entry.html", {
-            "entry": html,
-            "entryTitle": entry_name
+            "title": title,
+            "entry": markdown.markdown(entry),
+            "entry_raw": entry,
+            "form": SearchForm()
         })
 
 def search(request):
-
-    if request.method == 'POST':
-
-        input = request.POST['q']
-        html = convert_to_HTML(input)
-
-        entries = util.list_entries()
-        if input in entries:
-            return render(request, "encyclopedia/entry.html", {
-                "entry": html,
-                "entryTitle": input
-            })
-        else:
-            search_pages = []
-            for entry in entries:
-                if input in entry:
-                    search_pages.append(entry)
-            return render(request, "encyclopedia/search.html", {
-                "entries": search_pages,
-            })
-
-def new(request):
-      return render(request, "encyclopedia/new.html")
-
-def save(request):
-    if request.method == 'POST':
-    
-        input_title = request.POST['title']
-        input_text = request.POST['text']
-        entries = util.list_entries()
-        if input_title in entries:
-            return render(request, "encyclopedia/already_exist.html")
-        else:
-            util.save_entry(input_title, input_text)
-            html = convert_to_HTML(input_title)
-            return render(request, "encyclopedia/entry.html", {
-                "entry": html,
-                "entryTitle": input_title
-            })
-
-def rand(request):
-    arr = util.list_entries()
-    entry_title = random.choice(arr)
-    html = convert_to_HTML(entry_title)
-    return render(request, "encyclopedia/entry.html", {
-            "entry": html,
-            "entryTitle": entry_title
-        })
-
+    if request.method == "POST":
+        entries_found = []  
+        entries_all = util.list_entries()  
+        form = SearchForm(request.POST)  
+        if form.is_valid():
             
-def edit(request):
-    if request.method == 'POST':
-        input_title = request.POST['title']
-        text = util.get_entry(input_title)
+            query = form.cleaned_data["query"]
+            for entry in entries_all:
+                if query.lower() == entry.lower():
+                    title = entry
+                    entry = util.get_entry(title)
+                    return HttpResponseRedirect(reverse("entry", args=[title]))
+                if query.lower() in entry.lower():
+                    entries_found.append(entry)
+            return render(request, "encyclopedia/search.html", {
+                "results": entries_found,
+                "query": query,
+                "form": SearchForm()
+            })
+    return render(request, "encyclopedia/search.html", {
+        "results": "",
+        "query": "",
+        "form": SearchForm()
+    })
+
+def create(request):
+    if request.method == "POST":
+        new_entry = NewPageForm(request.POST) 
+        if new_entry.is_valid():
+            title = new_entry.cleaned_data["title"]
+            data = new_entry.cleaned_data["data"]
+            entries_all = util.list_entries()
+            for entry in entries_all:
+                if entry.lower() == title.lower():
+                    return render(request, "encyclopedia/create.html", {
+                        "form": SearchForm(),
+                        "newPageForm": NewPageForm(),
+                        "error": "That entry already exists!"
+                    })
+            new_entry_title = "# " + title
+            new_entry_data = "\n" + data
+            new_entry_content = new_entry_title + new_entry_data
+            util.save_entry(title, new_entry_content)
+            entry = util.get_entry(title)
+            return render(request, "encyclopedia/entry.html", {
+                "title": title,
+                "entry": markdown2.markdown(entry),
+                "form": SearchForm()
+            })
+    return render(request, "encyclopedia/create.html", {
+        "form": SearchForm(),
+        "newPageForm": NewPageForm()
+    })
+
+def editEntry(request, title):
+    if request.method == "POST":
+        entry = util.get_entry(title)
+        edit_form = EditPageForm(initial={'title': title, 'data': entry})
         return render(request, "encyclopedia/edit.html", {
-            "entry": text,
-            "entryTitle": input_title
+            "form": SearchForm(),
+            "editPageForm": edit_form,
+            "entry": entry,
+            "title": title
         })
 
-def save_edit(request):
-    if request.method == 'POST':
-        input_title = request.POST['title']
-        input_text = request.POST['text']
-        util.save_entry(input_title, input_text)
-        html = convert_to_HTML(input_title)
+def submitEditEntry(request, title):
+    if request.method == "POST":
+        edit_entry = EditPageForm(request.POST)
+        if edit_entry.is_valid():
+            content = edit_entry.cleaned_data["data"]
+            title_edit = edit_entry.cleaned_data["title"]
+            if title_edit != title:
+                filename = f"entries/{title}.md"
+                if default_storage.exists(filename):
+                    default_storage.delete(filename)
+            util.save_entry(title_edit, content)
+            entry = util.get_entry(title_edit)
+            msg_success = "Successfully updated!"
         return render(request, "encyclopedia/entry.html", {
-            "entry": html,
-            "entryTitle": input_title
+            "title": title_edit,
+            "entry": markdown2.markdown(entry),
+            "form": SearchForm(),
+            "msg_success": msg_success
         })
 
+def randomEntry(request):
+    entries = util.list_entries()
+    title = random.choice(entries)
+    entry = util.get_entry(title)
+    return HttpResponseRedirect(reverse("entry", args=[title]))

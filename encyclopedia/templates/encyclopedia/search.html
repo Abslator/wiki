@@ -1,16 +1,27 @@
 {% extends "encyclopedia/layout.html" %}
 
 {% block title %}
-    Search
+    Wiki
 {% endblock %}
 
 {% block body %}
-    <h1>Pages similar to your search</h1>
+    <h1>Search Results</h1>
+    <ul class="no-bullet">
+        <li style="color:gray">Displaying results for "{{ query }}"</li>
+        <br>
 
-    <ul>
-        {% for entry in entries %}
-            <li><a href="wiki/{{entry}}">{{entry}}</a></li>
+        {% if results|length == 1 %}
+            <p>Found {{ results|length }} result</p>
+            <hr/>
+        {% elif results|length > 1 %}
+            <li>Found {{ results|length }} results</li>
+            <hr/>
+        {% endif %}
+        
+        {% for result in results %}
+            <li><a href="{% url 'entry' result %}">{{ result }}</a></li>
+        {% empty %}
+            <li>No results</li>
         {% endfor %}
     </ul>
-
 {% endblock %}
